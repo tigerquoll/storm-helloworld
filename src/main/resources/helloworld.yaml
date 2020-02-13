@@ -1,0 +1,103 @@
+# topology definition
+# name to be used when submitting
+name: "helloworld-topology"
+
+# Components - constructors, property setters, and builder arguments.
+# Currently, components must be declared in the order they are referenced
+components:
+
+  - id: "spoutConfigBuilder"
+    className: "org.apache.storm.kafka.spout.KafkaSpoutConfig$Builder"
+    constructorArgs:
+      - "${kafka.broker.hosts}:6667"
+      - ["${kafka.input.topic}"]
+    configMethods:
+      - name: "setProp"
+        args:
+          - {
+            "key.deserializer" : "org.apache.kafka.common.serialization.StringDeserializer",
+            "value.deserializer": "org.apache.kafka.common.serialization.StringDeserializer"
+          }
+
+  - id: "spoutInputConfig"
+    className: "org.apache.storm.kafka.spout.KafkaSpoutConfig"
+    constructorArgs:
+      - ref: "spoutConfigBuilder"
+
+  # Topic selector for KafkaBolt
+  - id: "topicSelector"
+    className: "org.apache.storm.kafka.bolt.selector.DefaultTopicSelector"
+    constructorArgs:
+      - "${kafka.output.topic}"
+
+  # Mapper for KafkaBolt
+  - id: "kafkaMapper"
+    className: "org.apache.storm.kafka.bolt.mapper.FieldNameBasedTupleToKafkaMapper"
+    constructorArgs:
+      - "key"
+      - "message"
+
+  # Producer properties for KafkaBolt
+  - id: "producerProperties"
+    className: "java.util.Properties"
+    configMethods:
+      - name: "put"
+        args:
+          - "bootstrap.servers"
+          - "${kafka.broker.hosts}:6667"
+      - name: "put"
+        args:
+          - "acks"
+          - "1"
+      - name: "put"
+        args:
+          - "key.serializer"
+          - "org.apache.kafka.common.serialization.StringSerializer"
+      - name: "put"
+        args:
+          - "value.serializer"
+          - "org.apache.kafka.common.serialization.StringSerializer"
+
+# Topology configuration
+config:
+  topology.workers: 2
+
+# Spout definitions
+spouts:
+  - id: "kafka-input-spout"
+    className: "org.apache.storm.kafka.spout.KafkaSpout"
+    constructorArgs:
+      - ref: "spoutInputConfig"
+    # Set to the number of partitions for the topic
+    parallelism: 8
+
+# Bolt definitions
+bolts:
+  - id: "kafka-output-bolt"
+    className: "org.apache.storm.kafka.bolt.KafkaBolt"
+    parallelism: 8
+    configMethods:
+      - name: "withProducerProperties"
+        args: [ref: "producerProperties"]
+      - name: "withTopicSelector"
+        args: [ref: "topicSelector"]
+      - name: "withTupleToKafkaMapper"
+        args: [ref: "kafkaMapper"]
+
+  - id: "helloworld-processor-bolt"
+    className: "com.cloudera.parserchains.storm.HelloWorldProcessor"
+    parallelism: 1
+
+# Stream definitions
+streams:
+  - name: "kafka --> processor" # name isn't used (placeholder for logging, UI, etc.)
+    from: "kafka-input-spout"
+    to: "helloworld-processor-bolt"
+    grouping:
+      type: SHUFFLE
+
+  - name: "processor --> kafka"
+    from: "helloworld-processor-bolt"
+    to: "kafka-output-bolt"
+    grouping:
+      type: SHUFFLE
